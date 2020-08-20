@@ -15,29 +15,33 @@
  */
 package org.springframework.messaging.rsocket;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Collections;
 import java.util.Map;
 
 import io.netty.buffer.PooledByteBufAllocator;
 import io.rsocket.Payload;
-import io.rsocket.RSocket;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
-import org.mockito.ArgumentCaptor;
-import org.mockito.BDDMockito;
-import reactor.core.publisher.Mono;
+import io.rsocket.metadata.WellKnownMimeType;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
-import org.springframework.core.codec.CharSequenceEncoder;
+import org.springframework.core.ResolvableType;
+import org.springframework.core.codec.AbstractDataBufferDecoder;
+import org.springframework.core.codec.ByteArrayDecoder;
 import org.springframework.core.codec.StringDecoder;
+import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DataBufferFactory;
+import org.springframework.core.io.buffer.DataBufferUtils;
+import org.springframework.lang.Nullable;
 import org.springframework.util.Assert;
 import org.springframework.util.MimeType;
+import org.springframework.util.MimeTypeUtils;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.springframework.messaging.rsocket.MetadataExtractor.COMPOSITE_METADATA;
+import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.springframework.messaging.rsocket.MetadataExtractor.ROUTE_KEY;
-import static org.springframework.messaging.rsocket.MetadataExtractor.ROUTING;
 import static org.springframework.util.MimeTypeUtils.TEXT_HTML;
 import static org.springframework.util.MimeTypeUtils.TEXT_PLAIN;
 import static org.springframework.util.MimeTypeUtils.TEXT_XML;
@@ -49,31 +53,23 @@ import static org.springframework.util.MimeTypeUtils.TEXT_XML;
  */
 public class DefaultMetadataExtractorTests {
 
+	private static MimeType COMPOSITE_METADATA =
+			MimeTypeUtils.parseMimeType(WellKnownMimeType.MESSAGE_RSOCKET_COMPOSITE_METADATA.getString());
+
+
 	private RSocketStrategies strategies;
-
-	private ArgumentCaptor<Payload> captor;
-
-	private RSocket rsocket;
 
 	private DefaultMetadataExtractor extractor;
 
 
-	@Before
+	@BeforeEach
 	public void setUp() {
-		this.strategies = RSocketStrategies.builder()
-				.decoder(StringDecoder.allMimeTypes())
-				.encoder(CharSequenceEncoder.allMimeTypes())
-				.dataBufferFactory(new LeakAwareNettyDataBufferFactory(PooledByteBufAllocator.DEFAULT))
-				.build();
-
-		this.rsocket = BDDMockito.mock(RSocket.class);
-		this.captor = ArgumentCaptor.forClass(Payload.class);
-		BDDMockito.when(this.rsocket.fireAndForget(captor.capture())).thenReturn(Mono.empty());
-
-		this.extractor = new DefaultMetadataExtractor();
+		DataBufferFactory bufferFactory = new LeakAwareNettyDataBufferFactory(PooledByteBufAllocator.DEFAULT);
+		this.strategies = RSocketStrategies.builder().dataBufferFactory(bufferFactory).build();
+		this.extractor = new DefaultMetadataExtractor(StringDecoder.allMimeTypes());
 	}
 
-	@After
+	@AfterEach
 	public void tearDown() throws InterruptedException {
 		DataBufferFactory bufferFactory = this.strategies.dataBufferFactory();
 		((LeakAwareNettyDataBufferFactory) bufferFactory).checkForLeaks(Duration.ofSeconds(5));
@@ -82,16 +78,15 @@ public class DefaultMetadataExtractorTests {
 
 	@Test
 	public void compositeMetadataWithDefaultSettings() {
-
-		requester(COMPOSITE_METADATA).route("toA")
+		MetadataEncoder metadataEncoder = new MetadataEncoder(COMPOSITE_METADATA, this.strategies)
+				.route("toA")
 				.metadata("text data", TEXT_PLAIN)
 				.metadata("html data", TEXT_HTML)
-				.metadata("xml data", TEXT_XML)
-				.data("data")
-				.send().block();
+				.metadata("xml data", TEXT_XML);
 
-		Payload payload = this.captor.getValue();
-		Map<String, Object> result = this.extractor.extract(payload, COMPOSITE_METADATA, this.strategies);
+		DataBuffer metadata = metadataEncoder.encode().block();
+		Payload payload = createPayload(metadata);
+		Map<String, Object> result = this.extractor.extract(payload, COMPOSITE_METADATA);
 		payload.release();
 
 		assertThat(result).hasSize(1).containsEntry(ROUTE_KEY, "toA");
@@ -99,21 +94,19 @@ public class DefaultMetadataExtractorTests {
 
 	@Test
 	public void compositeMetadataWithMimeTypeRegistrations() {
-
 		this.extractor.metadataToExtract(TEXT_PLAIN, String.class, "text-entry");
 		this.extractor.metadataToExtract(TEXT_HTML, String.class, "html-entry");
 		this.extractor.metadataToExtract(TEXT_XML, String.class, "xml-entry");
 
-		requester(COMPOSITE_METADATA).route("toA")
+		MetadataEncoder metadataEncoder = new MetadataEncoder(COMPOSITE_METADATA, this.strategies)
+				.route("toA")
 				.metadata("text data", TEXT_PLAIN)
 				.metadata("html data", TEXT_HTML)
-				.metadata("xml data", TEXT_XML)
-				.data("data")
-				.send()
-				.block();
+				.metadata("xml data", TEXT_XML);
 
-		Payload payload = this.captor.getValue();
-		Map<String, Object> result = this.extractor.extract(payload, COMPOSITE_METADATA, this.strategies);
+		DataBuffer metadata = metadataEncoder.encode().block();
+		Payload payload = createPayload(metadata);
+		Map<String, Object> result = this.extractor.extract(payload, COMPOSITE_METADATA);
 		payload.release();
 
 		assertThat(result).hasSize(4)
@@ -125,10 +118,11 @@ public class DefaultMetadataExtractorTests {
 
 	@Test
 	public void route() {
-
-		requester(ROUTING).route("toA").data("data").send().block();
-		Payload payload = this.captor.getValue();
-		Map<String, Object> result = this.extractor.extract(payload, ROUTING, this.strategies);
+		MimeType metaMimeType = MimeTypeUtils.parseMimeType(WellKnownMimeType.MESSAGE_RSOCKET_ROUTING.getString());
+		MetadataEncoder metadataEncoder = new MetadataEncoder(metaMimeType, this.strategies).route("toA");
+		DataBuffer metadata = metadataEncoder.encode().block();
+		Payload payload = createPayload(metadata);
+		Map<String, Object> result = this.extractor.extract(payload, metaMimeType);
 		payload.release();
 
 		assertThat(result).hasSize(1).containsEntry(ROUTE_KEY, "toA");
@@ -136,12 +130,12 @@ public class DefaultMetadataExtractorTests {
 
 	@Test
 	public void routeAsText() {
-
 		this.extractor.metadataToExtract(TEXT_PLAIN, String.class, ROUTE_KEY);
 
-		requester(TEXT_PLAIN).route("toA").data("data").send().block();
-		Payload payload = this.captor.getValue();
-		Map<String, Object> result = this.extractor.extract(payload, TEXT_PLAIN, this.strategies);
+		MetadataEncoder metadataEncoder = new MetadataEncoder(TEXT_PLAIN, this.strategies).route("toA");
+		DataBuffer metadata = metadataEncoder.encode().block();
+		Payload payload = createPayload(metadata);
+		Map<String, Object> result = this.extractor.extract(payload, TEXT_PLAIN);
 		payload.release();
 
 		assertThat(result).hasSize(1).containsEntry(ROUTE_KEY, "toA");
@@ -149,7 +143,6 @@ public class DefaultMetadataExtractorTests {
 
 	@Test
 	public void routeWithCustomFormatting() {
-
 		this.extractor.metadataToExtract(TEXT_PLAIN, String.class, (text, result) -> {
 			String[] items = text.split(":");
 			Assert.isTrue(items.length == 2, "Expected two items");
@@ -157,9 +150,10 @@ public class DefaultMetadataExtractorTests {
 			result.put("entry1", items[1]);
 		});
 
-		requester(TEXT_PLAIN).metadata("toA:text data", null).data("data").send().block();
-		Payload payload = this.captor.getValue();
-		Map<String, Object> result = this.extractor.extract(payload, TEXT_PLAIN, this.strategies);
+		MetadataEncoder encoder = new MetadataEncoder(TEXT_PLAIN, this.strategies).metadata("toA:text data", null);
+		DataBuffer metadata = encoder.encode().block();
+		Payload payload = createPayload(metadata);
+		Map<String, Object> result = this.extractor.extract(payload, TEXT_PLAIN);
 		payload.release();
 
 		assertThat(result).hasSize(2)
@@ -167,9 +161,59 @@ public class DefaultMetadataExtractorTests {
 				.containsEntry("entry1", "text data");
 	}
 
+	@Test
+	public void nonCompositeMetadataCanBeReadTwice() {
+		DefaultMetadataExtractor extractor = new DefaultMetadataExtractor(new TestDecoder());
+		extractor.metadataToExtract(TEXT_PLAIN, String.class, "name");
 
-	private RSocketRequester requester(MimeType metadataMimeType) {
-		return RSocketRequester.wrap(this.rsocket, TEXT_PLAIN, metadataMimeType, this.strategies);
+		MetadataEncoder encoder = new MetadataEncoder(TEXT_PLAIN, this.strategies).metadata("value", null);
+		DataBuffer metadata = encoder.encode().block();
+		Payload payload = createPayload(metadata);
+
+		Map<String, Object> result = extractor.extract(payload, TEXT_PLAIN);
+		assertThat(result).hasSize(1).containsEntry("name", "value");
+
+		result = extractor.extract(payload, TEXT_PLAIN);
+		assertThat(result).hasSize(1).containsEntry("name", "value");
+
+		payload.release();
 	}
 
+	@Test
+	public void noDecoder() {
+		DefaultMetadataExtractor extractor =
+				new DefaultMetadataExtractor(Collections.singletonList(new ByteArrayDecoder())
+		);
+
+		assertThatIllegalArgumentException()
+				.isThrownBy(() -> extractor.metadataToExtract(TEXT_PLAIN, String.class, "key"))
+				.withMessage("No decoder for text/plain and java.lang.String");
+	}
+
+
+	private Payload createPayload(DataBuffer metadata) {
+		return PayloadUtils.createPayload(this.strategies.dataBufferFactory().allocateBuffer(), metadata);
+	}
+
+
+	/**
+	 * Like StringDecoder but consumes the reader index in order to prove that
+	 * extraction uses a slice and can be read twice.
+	 */
+	private static class TestDecoder extends AbstractDataBufferDecoder<String> {
+
+		public TestDecoder() {
+			super(TEXT_PLAIN);
+		}
+
+		@Override
+		public String decode(DataBuffer dataBuffer, ResolvableType elementType,
+				@Nullable MimeType mimeType, @Nullable Map<String, Object> hints) {
+
+			byte[] bytes = new byte[dataBuffer.readableByteCount()];
+			dataBuffer.read(bytes);
+			DataBufferUtils.release(dataBuffer);
+			return new String(bytes, StandardCharsets.UTF_8);
+		}
+	}
 }

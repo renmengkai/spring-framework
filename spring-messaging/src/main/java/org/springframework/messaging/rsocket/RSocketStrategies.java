@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2019 the original author or authors.
+ * Copyright 2002-2020 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,8 +20,6 @@ import java.util.List;
 import java.util.function.Consumer;
 
 import io.rsocket.Payload;
-import io.rsocket.RSocketFactory.ClientRSocketFactory;
-import io.rsocket.RSocketFactory.ServerRSocketFactory;
 
 import org.springframework.core.ReactiveAdapterRegistry;
 import org.springframework.core.ResolvableType;
@@ -98,9 +96,10 @@ public interface RSocketStrategies {
 	RouteMatcher routeMatcher();
 
 	/**
-	 * Return the configured {@link Builder#metadataExtractor(MetadataExtractor)}.
+	 * Return the configured
+	 * {@link Builder#reactiveAdapterStrategy(ReactiveAdapterRegistry) reactiveAdapterRegistry}.
 	 */
-	MetadataExtractor metadataExtractor();
+	ReactiveAdapterRegistry reactiveAdapterRegistry();
 
 	/**
 	 * Return the configured
@@ -109,10 +108,9 @@ public interface RSocketStrategies {
 	DataBufferFactory dataBufferFactory();
 
 	/**
-	 * Return the configured
-	 * {@link Builder#reactiveAdapterStrategy(ReactiveAdapterRegistry) reactiveAdapterRegistry}.
+	 * Return the configured {@link Builder#metadataExtractor(MetadataExtractor)}.
 	 */
-	ReactiveAdapterRegistry reactiveAdapterRegistry();
+	MetadataExtractor metadataExtractor();
 
 	/**
 	 * Return a builder to create a new {@link RSocketStrategies} instance
@@ -125,14 +123,15 @@ public interface RSocketStrategies {
 
 	/**
 	 * Create an {@code RSocketStrategies} instance with default settings.
-	 * Equivalent to {@code RSocketStrategies.builder().build()}.
+	 * Equivalent to {@code RSocketStrategies.builder().build()}. See individual
+	 * builder methods for details on default settings.
 	 */
 	static RSocketStrategies create() {
 		return new DefaultRSocketStrategies.DefaultRSocketStrategiesBuilder().build();
 	}
 
 	/**
-	 * Return a builder to build a new {@code RSocketStrategies} instance.
+	 * Return a builder to prepare a new {@code RSocketStrategies} instance.
 	 * The builder applies default settings, see individual builder methods for
 	 * details.
 	 */
@@ -178,20 +177,10 @@ public interface RSocketStrategies {
 		 * client or server responders.
 		 * <p>By default, {@link SimpleRouteMatcher} is used, backed by
 		 * {@link AntPathMatcher} with "." as separator. For better
-		 * efficiency consider using the {@code PathPatternRouteMatcher} from
+		 * efficiency consider switching to {@code PathPatternRouteMatcher} from
 		 * {@code spring-web} instead.
 		 */
 		Builder routeMatcher(@Nullable RouteMatcher routeMatcher);
-
-		/**
-		 * Configure a {@link MetadataExtractor} to extract the route along with
-		 * other metadata. This option is applicable to client or server
-		 * responders.
-		 * <p>By default this is {@link DefaultMetadataExtractor} extracting a
-		 * route from {@code "message/x.rsocket.routing.v0"} or
-		 * {@code "text/plain"} metadata entries.
-		 */
-		Builder metadataExtractor(@Nullable MetadataExtractor metadataExtractor);
 
 		/**
 		 * Configure the registry for reactive type support. This can be used to
@@ -209,14 +198,31 @@ public interface RSocketStrategies {
 		 * <a href="https://github.com/rsocket/rsocket-java#zero-copy">configured</a>
 		 * for zero copy. For client setup, {@link RSocketRequester.Builder}
 		 * adapts automatically to the {@code DataBufferFactory} configured
-		 * here, and sets the frame decoder in {@link ClientRSocketFactory
-		 * ClientRSocketFactory} accordingly. For server setup, the
-		 * {@link ServerRSocketFactory ServerRSocketFactory} must be configured
-		 * accordingly too for zero copy.
+		 * here, and sets the frame decoder in
+		 * {@link io.rsocket.core.RSocketConnector RSocketConnector}
+		 * accordingly. For server setup, the
+		 * {@link io.rsocket.core.RSocketServer RSocketServer} must be configured
+		 * accordingly for zero copy too.
 		 * <p>If using {@link DefaultDataBufferFactory} instead, there is no
 		 * need for related config changes in RSocket.
 		 */
 		Builder dataBufferFactory(@Nullable DataBufferFactory bufferFactory);
+
+		/**
+		 * Configure a {@link MetadataExtractor} to extract the route along with
+		 * other metadata. This option is applicable to client or server
+		 * responders.
+		 * <p>By default this is {@link DefaultMetadataExtractor} created with
+		 * the {@link #decoder(Decoder[]) configured} decoders and extracting a
+		 * route from {@code "message/x.rsocket.routing.v0"} metadata.
+		 */
+		Builder metadataExtractor(@Nullable MetadataExtractor metadataExtractor);
+
+		/**
+		 * Apply the consumer to the {@link MetadataExtractorRegistry} in order
+		 * to register extra metadata entry extractors.
+		 */
+		Builder metadataExtractorRegistry(Consumer<MetadataExtractorRegistry> consumer);
 
 		/**
 		 * Build the {@code RSocketStrategies} instance.

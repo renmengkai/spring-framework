@@ -77,40 +77,7 @@ class MergedSqlConfig {
 		Assert.notNull(localSqlConfig, "Local @SqlConfig must not be null");
 		Assert.notNull(testClass, "testClass must not be null");
 
-		AnnotationAttributes mergedAttributes;
-		AnnotationAttributes localAttributes = AnnotationUtils.getAnnotationAttributes(localSqlConfig, false, false);
-		// Enforce comment prefix aliases within the local @SqlConfig.
-		enforceCommentPrefixAliases(localAttributes);
-
-		// Get global attributes, if any.
-		AnnotationAttributes globalAttributes = AnnotatedElementUtils.findMergedAnnotationAttributes(
-				testClass, SqlConfig.class.getName(), false, false);
-
-		if (globalAttributes != null) {
-			// Enforce comment prefix aliases within the global @SqlConfig.
-			enforceCommentPrefixAliases(globalAttributes);
-
-			for (String key : globalAttributes.keySet()) {
-				Object value = localAttributes.get(key);
-				if (isExplicitValue(value)) {
-					// Override global attribute with local attribute.
-					globalAttributes.put(key, value);
-
-					// Ensure comment prefix aliases are honored during the merge.
-					if (key.equals(COMMENT_PREFIX) && isEmptyArray(localAttributes.get(COMMENT_PREFIXES))) {
-						globalAttributes.put(COMMENT_PREFIXES, value);
-					}
-					else if (key.equals(COMMENT_PREFIXES) && isEmptyString(localAttributes.get(COMMENT_PREFIX))) {
-						globalAttributes.put(COMMENT_PREFIX, value);
-					}
-				}
-			}
-			mergedAttributes = globalAttributes;
-		}
-		else {
-			// Otherwise, use local attributes only.
-			mergedAttributes = localAttributes;
-		}
+		AnnotationAttributes mergedAttributes = mergeAttributes(localSqlConfig, testClass);
 
 		this.dataSource = mergedAttributes.getString("dataSource");
 		this.transactionManager = mergedAttributes.getString("transactionManager");
@@ -126,7 +93,44 @@ class MergedSqlConfig {
 		this.errorMode = getEnum(mergedAttributes, "errorMode", ErrorMode.DEFAULT, ErrorMode.FAIL_ON_ERROR);
 	}
 
+	private AnnotationAttributes mergeAttributes(SqlConfig localSqlConfig, Class<?> testClass) {
+		AnnotationAttributes localAttributes = AnnotationUtils.getAnnotationAttributes(localSqlConfig, false, false);
+
+		// Enforce comment prefix aliases within the local @SqlConfig.
+		enforceCommentPrefixAliases(localAttributes);
+
+		// Get global attributes, if any.
+		AnnotationAttributes globalAttributes = AnnotatedElementUtils.findMergedAnnotationAttributes(
+				testClass, SqlConfig.class.getName(), false, false);
+
+		// Use local attributes only?
+		if (globalAttributes == null) {
+			return localAttributes;
+		}
+
+		// Enforce comment prefix aliases within the global @SqlConfig.
+		enforceCommentPrefixAliases(globalAttributes);
+
+		for (String key : globalAttributes.keySet()) {
+			Object value = localAttributes.get(key);
+			if (isExplicitValue(value)) {
+				// Override global attribute with local attribute.
+				globalAttributes.put(key, value);
+
+				// Ensure comment prefix aliases are honored during the merge.
+				if (key.equals(COMMENT_PREFIX) && isEmptyArray(localAttributes.get(COMMENT_PREFIXES))) {
+					globalAttributes.put(COMMENT_PREFIXES, value);
+				}
+				else if (key.equals(COMMENT_PREFIXES) && isEmptyString(localAttributes.get(COMMENT_PREFIX))) {
+					globalAttributes.put(COMMENT_PREFIX, value);
+				}
+			}
+		}
+		return globalAttributes;
+	}
+
 	/**
+	 * Get the bean name of the {@link javax.sql.DataSource}.
 	 * @see SqlConfig#dataSource()
 	 */
 	String getDataSource() {
@@ -134,6 +138,7 @@ class MergedSqlConfig {
 	}
 
 	/**
+	 * Get the bean name of the {@link org.springframework.transaction.PlatformTransactionManager}.
 	 * @see SqlConfig#transactionManager()
 	 */
 	String getTransactionManager() {
@@ -141,6 +146,7 @@ class MergedSqlConfig {
 	}
 
 	/**
+	 * Get the {@link TransactionMode}.
 	 * @see SqlConfig#transactionMode()
 	 */
 	TransactionMode getTransactionMode() {
@@ -148,6 +154,8 @@ class MergedSqlConfig {
 	}
 
 	/**
+	 * Get the encoding for the SQL scripts, if different from the platform
+	 * encoding.
 	 * @see SqlConfig#encoding()
 	 */
 	String getEncoding() {
@@ -155,6 +163,8 @@ class MergedSqlConfig {
 	}
 
 	/**
+	 * Get the character string used to separate individual statements within the
+	 * SQL scripts.
 	 * @see SqlConfig#separator()
 	 */
 	String getSeparator() {
@@ -162,6 +172,7 @@ class MergedSqlConfig {
 	}
 
 	/**
+	 * Get the prefixes that identify single-line comments within the SQL scripts.
 	 * @see SqlConfig#commentPrefixes()
 	 * @since 5.2
 	 */
@@ -170,6 +181,7 @@ class MergedSqlConfig {
 	}
 
 	/**
+	 * Get the start delimiter that identifies block comments within the SQL scripts.
 	 * @see SqlConfig#blockCommentStartDelimiter()
 	 */
 	String getBlockCommentStartDelimiter() {
@@ -177,6 +189,7 @@ class MergedSqlConfig {
 	}
 
 	/**
+	 * Get the end delimiter that identifies block comments within the SQL scripts.
 	 * @see SqlConfig#blockCommentEndDelimiter()
 	 */
 	String getBlockCommentEndDelimiter() {
@@ -184,6 +197,7 @@ class MergedSqlConfig {
 	}
 
 	/**
+	 * Get the {@link ErrorMode}.
 	 * @see SqlConfig#errorMode()
 	 */
 	ErrorMode getErrorMode() {

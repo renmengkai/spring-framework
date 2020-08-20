@@ -15,12 +15,15 @@
  */
 package org.springframework.messaging.rsocket.annotation.support;
 
+import java.util.Arrays;
 import java.util.Collections;
-import java.util.List;
 import java.util.Map;
 
 import io.rsocket.frame.FrameType;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import reactor.test.StepVerifier;
 
 import org.springframework.core.ReactiveAdapterRegistry;
 import org.springframework.core.codec.ByteArrayDecoder;
@@ -28,8 +31,6 @@ import org.springframework.core.codec.ByteArrayEncoder;
 import org.springframework.core.codec.ByteBufferDecoder;
 import org.springframework.core.codec.ByteBufferEncoder;
 import org.springframework.core.codec.CharSequenceEncoder;
-import org.springframework.core.codec.DataBufferDecoder;
-import org.springframework.core.codec.DataBufferEncoder;
 import org.springframework.core.codec.StringDecoder;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.handler.CompositeMessageCondition;
@@ -57,14 +58,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class RSocketMessageHandlerTests {
 
 	@Test
-	public void rsocketStrategiesInitializedFromOtherProperties() {
+	public void getRSocketStrategies() {
 		RSocketMessageHandler handler = new RSocketMessageHandler();
 		handler.setDecoders(Collections.singletonList(new ByteArrayDecoder()));
 		handler.setEncoders(Collections.singletonList(new ByteArrayEncoder()));
 		handler.setRouteMatcher(new SimpleRouteMatcher(new AntPathMatcher()));
 		handler.setMetadataExtractor(new DefaultMetadataExtractor());
 		handler.setReactiveAdapterRegistry(new ReactiveAdapterRegistry());
-		handler.afterPropertiesSet();
 
 		RSocketStrategies strategies = handler.getRSocketStrategies();
 		assertThat(strategies).isNotNull();
@@ -76,39 +76,10 @@ public class RSocketMessageHandlerTests {
 	}
 
 	@Test
-	public void rsocketStrategiesInitializedFromDefaults() {
-
-		RSocketMessageHandler handler = new RSocketMessageHandler();
-		handler.afterPropertiesSet();
-
-		RSocketStrategies strategies = handler.getRSocketStrategies();
-		assertThat(strategies).isNotNull();
-
-		assertThat(strategies.encoders()).hasSize(4).hasOnlyElementsOfTypes(
-				CharSequenceEncoder.class,
-				ByteArrayEncoder.class,
-				ByteBufferEncoder.class,
-				DataBufferEncoder.class);
-
-		assertThat(strategies.decoders()).hasSize(4).hasOnlyElementsOfTypes(
-				StringDecoder.class,
-				ByteArrayDecoder.class,
-				ByteBufferDecoder.class,
-				DataBufferDecoder.class);
-
-		assertThat(strategies.routeMatcher()).isSameAs(handler.getRouteMatcher()).isNotNull();
-		assertThat(strategies.metadataExtractor()).isSameAs(handler.getMetadataExtractor()).isNotNull();
-		assertThat(strategies.reactiveAdapterRegistry()).isSameAs(handler.getReactiveAdapterRegistry()).isNotNull();
-	}
-
-	@Test
-	public void rsocketStrategiesSetsOtherProperties() {
-
+	public void setRSocketStrategies() {
 		RSocketStrategies strategies = RSocketStrategies.builder()
-				.encoders(List::clear)
-				.decoders(List::clear)
-				.encoders(encoders -> encoders.add(new ByteArrayEncoder()))
-				.decoders(decoders -> decoders.add(new ByteArrayDecoder()))
+				.encoder(new ByteArrayEncoder())
+				.decoder(new ByteArrayDecoder())
 				.routeMatcher(new SimpleRouteMatcher(new AntPathMatcher()))
 				.metadataExtractor(new DefaultMetadataExtractor())
 				.reactiveAdapterStrategy(new ReactiveAdapterRegistry())
@@ -116,7 +87,6 @@ public class RSocketMessageHandlerTests {
 
 		RSocketMessageHandler handler = new RSocketMessageHandler();
 		handler.setRSocketStrategies(strategies);
-		handler.afterPropertiesSet();
 
 		assertThat(handler.getEncoders()).isEqualTo(strategies.encoders());
 		assertThat(handler.getDecoders()).isEqualTo(strategies.decoders());
@@ -126,22 +96,25 @@ public class RSocketMessageHandlerTests {
 	}
 
 	@Test
-	public void rsocketStrategiesReflectsFurtherChangesToOtherProperties() {
+	public void getRSocketStrategiesReflectsCurrentState() {
 
 		RSocketMessageHandler handler = new RSocketMessageHandler();
 
-		// RSocketStrategies sets other properties first
-		handler.setRSocketStrategies(RSocketStrategies.builder()
-				.encoders(List::clear)
-				.decoders(List::clear)
-				.encoders(encoders -> encoders.add(new ByteArrayEncoder()))
-				.decoders(decoders -> decoders.add(new ByteArrayDecoder()))
-				.routeMatcher(new SimpleRouteMatcher(new AntPathMatcher()))
-				.metadataExtractor(new DefaultMetadataExtractor())
-				.reactiveAdapterStrategy(new ReactiveAdapterRegistry())
-				.build());
+		// 1. Set properties
+		handler.setDecoders(Collections.singletonList(new ByteArrayDecoder()));
+		handler.setEncoders(Collections.singletonList(new ByteArrayEncoder()));
+		handler.setRouteMatcher(new SimpleRouteMatcher(new AntPathMatcher()));
+		handler.setMetadataExtractor(new DefaultMetadataExtractor());
+		handler.setReactiveAdapterRegistry(new ReactiveAdapterRegistry());
 
-		// Followed by further changes to other properties
+		RSocketStrategies strategies = handler.getRSocketStrategies();
+		assertThat(strategies.encoders()).isEqualTo(handler.getEncoders());
+		assertThat(strategies.decoders()).isEqualTo(handler.getDecoders());
+		assertThat(strategies.routeMatcher()).isSameAs(handler.getRouteMatcher());
+		assertThat(strategies.metadataExtractor()).isSameAs(handler.getMetadataExtractor());
+		assertThat(strategies.reactiveAdapterRegistry()).isSameAs(handler.getReactiveAdapterRegistry());
+
+		// 2. Set properties again
 		handler.setDecoders(Collections.singletonList(StringDecoder.allMimeTypes()));
 		handler.setEncoders(Collections.singletonList(CharSequenceEncoder.allMimeTypes()));
 		handler.setRouteMatcher(new SimpleRouteMatcher(new AntPathMatcher()));
@@ -149,13 +122,25 @@ public class RSocketMessageHandlerTests {
 		handler.setReactiveAdapterRegistry(new ReactiveAdapterRegistry());
 		handler.afterPropertiesSet();
 
-		// RSocketStrategies should reflect current state
-		RSocketStrategies strategies = handler.getRSocketStrategies();
+		strategies = handler.getRSocketStrategies();
 		assertThat(strategies.encoders()).isEqualTo(handler.getEncoders());
 		assertThat(strategies.decoders()).isEqualTo(handler.getDecoders());
 		assertThat(strategies.routeMatcher()).isSameAs(handler.getRouteMatcher());
 		assertThat(strategies.metadataExtractor()).isSameAs(handler.getMetadataExtractor());
 		assertThat(strategies.reactiveAdapterRegistry()).isSameAs(handler.getReactiveAdapterRegistry());
+	}
+
+	@Test
+	public void metadataExtractorWithExplicitlySetDecoders() {
+		DefaultMetadataExtractor extractor = new DefaultMetadataExtractor(StringDecoder.allMimeTypes());
+
+		RSocketMessageHandler handler = new RSocketMessageHandler();
+		handler.setDecoders(Arrays.asList(new ByteArrayDecoder(), new ByteBufferDecoder()));
+		handler.setEncoders(Collections.singletonList(new ByteBufferEncoder()));
+		handler.setMetadataExtractor(extractor);
+		handler.afterPropertiesSet();
+
+		assertThat(((DefaultMetadataExtractor) handler.getMetadataExtractor()).getDecoders()).hasSize(1);
 	}
 
 	@Test
@@ -186,6 +171,69 @@ public class RSocketMessageHandlerTests {
 		else {
 			assertThat(c2.getPatterns()).contains(expectedPatterns);
 		}
+	}
+
+	@Test
+	public void rejectConnectMappingMethodsThatCanReply() {
+
+		RSocketMessageHandler handler = new RSocketMessageHandler();
+		handler.setHandlers(Collections.singletonList(new InvalidConnectMappingController()));
+		assertThatThrownBy(handler::afterPropertiesSet)
+				.hasMessage("Invalid @ConnectMapping method. " +
+						"Return type must be void or a void async type: " +
+						"public java.lang.String org.springframework.messaging.rsocket.annotation.support." +
+						"RSocketMessageHandlerTests$InvalidConnectMappingController.connectString()");
+
+		handler = new RSocketMessageHandler();
+		handler.setHandlers(Collections.singletonList(new AnotherInvalidConnectMappingController()));
+		assertThatThrownBy(handler::afterPropertiesSet)
+				.hasMessage("Invalid @ConnectMapping method. " +
+						"Return type must be void or a void async type: " +
+						"public reactor.core.publisher.Mono<java.lang.String> " +
+						"org.springframework.messaging.rsocket.annotation.support." +
+						"RSocketMessageHandlerTests$AnotherInvalidConnectMappingController.connectString()");
+	}
+
+	@Test
+	public void ignoreFireAndForgetToHandlerThatCanReply() {
+
+		InteractionMismatchController controller = new InteractionMismatchController();
+
+		RSocketMessageHandler handler = new RSocketMessageHandler();
+		handler.setHandlers(Collections.singletonList(controller));
+		handler.afterPropertiesSet();
+
+		MessageHeaderAccessor headers = new MessageHeaderAccessor();
+		headers.setLeaveMutable(true);
+		RouteMatcher.Route route = handler.getRouteMatcher().parseRoute("mono-string");
+		headers.setHeader(DestinationPatternsMessageCondition.LOOKUP_DESTINATION_HEADER, route);
+		headers.setHeader(RSocketFrameTypeMessageCondition.FRAME_TYPE_HEADER, FrameType.REQUEST_FNF);
+		Message<?> message = MessageBuilder.createMessage(Mono.empty(), headers.getMessageHeaders());
+
+		// Simply dropped and logged (error cannot propagate to client)
+		StepVerifier.create(handler.handleMessage(message)).expectComplete().verify();
+		assertThat(controller.invokeCount).isEqualTo(0);
+	}
+
+	@Test
+	public void rejectRequestResponseToStreamingHandler() {
+
+		RSocketMessageHandler handler = new RSocketMessageHandler();
+		handler.setHandlers(Collections.singletonList(new InteractionMismatchController()));
+		handler.afterPropertiesSet();
+
+		MessageHeaderAccessor headers = new MessageHeaderAccessor();
+		headers.setLeaveMutable(true);
+		RouteMatcher.Route route = handler.getRouteMatcher().parseRoute("flux-string");
+		headers.setHeader(DestinationPatternsMessageCondition.LOOKUP_DESTINATION_HEADER, route);
+		headers.setHeader(RSocketFrameTypeMessageCondition.FRAME_TYPE_HEADER, FrameType.REQUEST_RESPONSE);
+		Message<?> message = MessageBuilder.createMessage(Mono.empty(), headers.getMessageHeaders());
+
+		StepVerifier.create(handler.handleMessage(message))
+				.expectErrorMessage(
+						"Destination 'flux-string' does not support REQUEST_RESPONSE. " +
+								"Supported interaction(s): [REQUEST_STREAM]")
+				.verify();
 	}
 
 	@Test
@@ -237,6 +285,40 @@ public class RSocketMessageHandlerTests {
 
 		@ConnectMapping
 		public void handleAll() {
+		}
+	}
+
+
+	private static class InvalidConnectMappingController {
+
+		@ConnectMapping
+		public String connectString() {
+			return "";
+		}
+	}
+
+	private static class AnotherInvalidConnectMappingController {
+
+		@ConnectMapping
+		public Mono<String> connectString() {
+			return Mono.empty();
+		}
+	}
+
+	private static class InteractionMismatchController {
+
+		private int invokeCount;
+
+		@MessageMapping("mono-string")
+		public Mono<String> messageMonoString() {
+			this.invokeCount++;
+			return Mono.empty();
+		}
+
+		@MessageMapping("flux-string")
+		public Flux<String> messageFluxString() {
+			this.invokeCount++;
+			return Flux.empty();
 		}
 	}
 

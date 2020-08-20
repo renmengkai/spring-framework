@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2019 the original author or authors.
+ * Copyright 2002-2020 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -60,6 +60,8 @@ import org.springframework.lang.Nullable;
  */
 public abstract class StringUtils {
 
+	private static final String[] EMPTY_STRING_ARRAY = {};
+
 	private static final String FOLDER_SEPARATOR = "/";
 
 	private static final String WINDOWS_FOLDER_SEPARATOR = "\\";
@@ -77,7 +79,7 @@ public abstract class StringUtils {
 
 	/**
 	 * Check whether the given object (possibly a {@code String}) is empty.
-	 * This is effectly a shortcut for {@code !hasLength(String)}.
+	 * This is effectively a shortcut for {@code !hasLength(String)}.
 	 * <p>This method accepts any Object as an argument, comparing it to
 	 * {@code null} and the empty String. As a consequence, this method
 	 * will never return {@code true} for a non-null non-String object.
@@ -418,14 +420,14 @@ public abstract class StringUtils {
 		int pos = 0;  // our position in the old string
 		int patLen = oldPattern.length();
 		while (index >= 0) {
-			sb.append(inString.substring(pos, index));
+			sb.append(inString, pos, index);
 			sb.append(newPattern);
 			pos = index + patLen;
 			index = inString.indexOf(oldPattern, pos);
 		}
 
 		// append any characters to the right of a match
-		sb.append(inString.substring(pos));
+		sb.append(inString, pos, inString.length());
 		return sb.toString();
 	}
 
@@ -451,16 +453,19 @@ public abstract class StringUtils {
 			return inString;
 		}
 
-		StringBuilder sb = new StringBuilder(inString.length());
+		int lastCharIndex = 0;
+		char[] result = new char[inString.length()];
 		for (int i = 0; i < inString.length(); i++) {
 			char c = inString.charAt(i);
 			if (charsToDelete.indexOf(c) == -1) {
-				sb.append(c);
+				result[lastCharIndex++] = c;
 			}
 		}
-		return sb.toString();
+		if (lastCharIndex == inString.length()) {
+			return inString;
+		}
+		return new String(result, 0, lastCharIndex);
 	}
-
 
 	//---------------------------------------------------------------------
 	// Convenience methods for working with formatted Strings
@@ -640,6 +645,9 @@ public abstract class StringUtils {
 	 * inner simple dots.
 	 * <p>The result is convenient for path comparison. For other uses,
 	 * notice that Windows separators ("\") are replaced by simple slashes.
+	 * <p><strong>NOTE</strong> that {@code cleanPath} should not be depended
+	 * upon in a security context. Other mechanisms should be used to prevent
+	 * path-traversal issues.
 	 * @param path the original path
 	 * @return the normalized path
 	 */
@@ -699,6 +707,10 @@ public abstract class StringUtils {
 			}
 		}
 
+		// All path elements stayed the same - shortcut
+		if (pathArray.length == pathElements.size()) {
+			return prefix + pathToUse;
+		}
 		// Remaining top paths need to be retained.
 		for (int i = 0; i < tops; i++) {
 			pathElements.add(0, TOP_PATH);
@@ -743,7 +755,7 @@ public abstract class StringUtils {
 		}
 		Assert.notNull(charset, "Charset must not be null");
 
-		ByteArrayOutputStream bos = new ByteArrayOutputStream(length);
+		ByteArrayOutputStream baos = new ByteArrayOutputStream(length);
 		boolean changed = false;
 		for (int i = 0; i < length; i++) {
 			int ch = source.charAt(i);
@@ -756,7 +768,7 @@ public abstract class StringUtils {
 					if (u == -1 || l == -1) {
 						throw new IllegalArgumentException("Invalid encoded sequence \"" + source.substring(i) + "\"");
 					}
-					bos.write((char) ((u << 4) + l));
+					baos.write((char) ((u << 4) + l));
 					i += 2;
 					changed = true;
 				}
@@ -765,10 +777,10 @@ public abstract class StringUtils {
 				}
 			}
 			else {
-				bos.write(ch);
+				baos.write(ch);
 			}
 		}
-		return (changed ? new String(bos.toByteArray(), charset) : source);
+		return (changed ? StreamUtils.copyToString(baos, charset) : source);
 	}
 
 	/**
@@ -898,7 +910,7 @@ public abstract class StringUtils {
 	 * @return the resulting {@code String} array
 	 */
 	public static String[] toStringArray(@Nullable Collection<String> collection) {
-		return (collection != null ? collection.toArray(new String[0]) : new String[0]);
+		return (!CollectionUtils.isEmpty(collection) ? collection.toArray(EMPTY_STRING_ARRAY) : EMPTY_STRING_ARRAY);
 	}
 
 	/**
@@ -909,7 +921,7 @@ public abstract class StringUtils {
 	 * @return the resulting {@code String} array
 	 */
 	public static String[] toStringArray(@Nullable Enumeration<String> enumeration) {
-		return (enumeration != null ? toStringArray(Collections.list(enumeration)) : new String[0]);
+		return (enumeration != null ? toStringArray(Collections.list(enumeration)) : EMPTY_STRING_ARRAY);
 	}
 
 	/**
@@ -1000,8 +1012,8 @@ public abstract class StringUtils {
 	}
 
 	/**
-	 * Trim the elements of the given {@code String} array,
-	 * calling {@code String.trim()} on each of them.
+	 * Trim the elements of the given {@code String} array, calling
+	 * {@code String.trim()} on each non-null element.
 	 * @param array the original {@code String} array (potentially empty)
 	 * @return the resulting array (of the same size) with trimmed elements
 	 */
@@ -1151,7 +1163,7 @@ public abstract class StringUtils {
 			@Nullable String str, String delimiters, boolean trimTokens, boolean ignoreEmptyTokens) {
 
 		if (str == null) {
-			return new String[0];
+			return EMPTY_STRING_ARRAY;
 		}
 
 		StringTokenizer st = new StringTokenizer(str, delimiters);
@@ -1204,7 +1216,7 @@ public abstract class StringUtils {
 			@Nullable String str, @Nullable String delimiter, @Nullable String charsToDelete) {
 
 		if (str == null) {
-			return new String[0];
+			return EMPTY_STRING_ARRAY;
 		}
 		if (delimiter == null) {
 			return new String[] {str};
